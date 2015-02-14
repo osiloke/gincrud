@@ -1,18 +1,25 @@
 package gincrud
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"github.com/fatih/structs"
 	"github.com/gin-gonic/gin"
 	"github.com/osiloke/gostore"
+	"strconv"
 )
 
 type GetKey func(interface{}, *gin.Context) string
 
+//TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
 func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 	var results []map[string]interface{}
-	data, _ := store.GetAll(10, bucket)
+	count := 10
+	q := c.Request.URL.Query()
+	if val, ok := q["_perPage"]; ok {
+		count, _ = strconv.Atoi(val[0])
+	}
+	data, _ := store.GetAll(count, bucket)
 	for _, element := range data {
 		var result map[string]interface{}
 		_ = json.Unmarshal(element[1], &result)
@@ -20,9 +27,10 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 		results = append(results, result)
 	}
 	if len(results) == 0 {
-		//		c.JSON(204, nil)
-		c.Abort(204)
+		c.JSON(200, []string{})
 	} else {
+		stats, _ := store.Stats(bucket)
+		c.Writer.Header().Set("X-Total-Count", fmt.Sprintf("%d", stats["KeyN"]))
 		c.JSON(200, results)
 	}
 }
@@ -31,7 +39,8 @@ func Get(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 	data, err := store.Get([]byte(key), bucket)
 	if err != nil {
 		//TODO: Does not exist error for store
-		c.JSON(404, gin.H{"msg": fmt.Sprintf("An error occured while retrieving %s - %s", key, err)})
+		fmt.Println("Could not retrieve", key, "from", bucket)
+		c.JSON(404, gin.H{"msg": fmt.Sprintf("Not found")})
 	} else {
 		_ = json.Unmarshal(data[1], record)
 		m := structs.Map(record)
