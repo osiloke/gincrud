@@ -11,6 +11,11 @@ import (
 
 type GetKey func(interface{}, *gin.Context) string
 
+type Results struct {
+	Data []map[string]interface{} `json:"data"`
+	Next string                   `json:"next,omitempty"`
+}
+
 //TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
 func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 	var results []map[string]interface{}
@@ -19,7 +24,16 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 	if val, ok := q["_perPage"]; ok {
 		count, _ = strconv.Atoi(val[0])
 	}
-	data, _ := store.GetAll(count, bucket)
+	var data [][][]byte
+	var next [][]byte
+	if val, ok := q["afterKey"]; ok {
+		data, next, _ = store.GetAllAfter([]byte(val[0]), count, bucket)
+	} else if val, ok := q["beforeKey"]; ok {
+		data, next, _ = store.GetAllBefore([]byte(val[0]), count, bucket)
+	} else {
+		data, next, _ = store.GetAll(count, bucket)
+	}
+
 	for _, element := range data {
 		var result map[string]interface{}
 		_ = json.Unmarshal(element[1], &result)
@@ -31,7 +45,7 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 	} else {
 		stats, _ := store.Stats(bucket)
 		c.Writer.Header().Set("X-Total-Count", fmt.Sprintf("%d", stats["KeyN"]))
-		c.JSON(200, results)
+		c.JSON(200, Results{results, string(next[0])})
 	}
 }
 
