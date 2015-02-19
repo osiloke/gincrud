@@ -27,9 +27,9 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 	var data [][][]byte
 
 	if val, ok := q["afterKey"]; ok {
-		data, _ = store.GetAllAfter([]byte(val[0]), count+1, 1, bucket)
+		data, _ = store.GetAllAfter([]byte(val[0]), count+1, 0, bucket)
 	} else if val, ok := q["beforeKey"]; ok {
-		data, _ = store.GetAllBefore([]byte(val[0]), count+1, 1, bucket)
+		data, _ = store.GetAllBefore([]byte(val[0]), count+1, 0, bucket)
 	} else {
 		data, _ = store.GetAll(count+1, 0, bucket)
 	}
@@ -46,6 +46,7 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context) {
 		stats, _ := store.Stats(bucket)
 		c.Writer.Header().Set("X-Total-Count", fmt.Sprintf("%d", stats["KeyN"]))
 		c.JSON(200, Results{results, count})
+		// c.JSON(200, results)
 	}
 }
 
