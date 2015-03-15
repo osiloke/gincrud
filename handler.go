@@ -216,7 +216,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 				result := ErrorList{"Malformed data", e.Serialize()}
 				c.JSON(400, result)
 			} else {
-				c.JSON(400, err)
+				c.JSON(400, gin.H{"msg": err})
 			}
 
 		} else {
@@ -275,7 +275,7 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 				result := ErrorList{"Malformed data", e.Serialize()}
 				c.JSON(400, result)
 			} else {
-				c.JSON(400, err)
+				c.JSON(400, gin.H{"msg": err.Error()})
 			}
 
 		} else {
