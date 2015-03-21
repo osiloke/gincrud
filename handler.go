@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"github.com/fatih/structs"
 	"github.com/gin-gonic/gin"
+	"github.com/mgutz/logxi/v1"
 	"github.com/osiloke/gostore"
+	"reflect"
+	"runtime"
 	"strconv"
 )
+
+var logger = log.New("gincrud")
 
 type ErrorList struct {
 	Msg   string                 `json:"msg"`
@@ -70,6 +75,10 @@ const (
 	JSON_CONTENT = "json"
 	XML_CONTENT  = "xml"
 )
+
+func GetFunctionName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+}
 
 func filterFlags(content string) string {
 	for i, a := range content {
@@ -148,9 +157,17 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, onSuccess OnSucc
 	} else {
 		for _, element := range data {
 			var result map[string]interface{}
-			_ = json.Unmarshal(element[1], &result)
-			result["key"] = string(element[0])
-			results = append(results, result)
+			if err := json.Unmarshal(element[1], &result); err != nil {
+				onError(ErrorCtx{Bucket: bucket, GinCtx: c}, err)
+				c.JSON(500, gin.H{"msg": err})
+			} else {
+				if result == nil {
+					result = make(map[string]interface{})
+				}
+
+				result["key"] = string(element[0])
+				results = append(results, result)
+			}
 		}
 		if len(results) == 0 {
 			c.JSON(200, []string{})
@@ -174,11 +191,14 @@ func Get(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 		if onError != nil {
 			onError(ErrorCtx{bucket, key, c}, err)
 		}
-		fmt.Println("Could not retrieve", key, "from", bucket)
+		log.Error("Could not retrieve", "key", key, "from", bucket)
 		c.JSON(404, gin.H{"msg": fmt.Sprintf("Not found")})
 	} else {
 		if unMarshalFn != nil {
 			m, err := unMarshalFn(c, data[1])
+			if m == nil {
+				m = make(map[string]interface{})
+			}
 			m["key"] = string(data[0])
 			if err != nil {
 				c.JSON(500, err)
@@ -206,7 +226,9 @@ func Get(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 
 func Post(bucket string, store gostore.Store, c *gin.Context,
 	record interface{}, fn GetKey, marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
+	logger.Debug("Post")
 	if marshalFn != nil {
+		logger.Debug("Post::MarshalFn")
 		obj, err := marshalFn(c)
 		if err != nil {
 			if onError != nil {
@@ -228,8 +250,10 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 				if err != nil {
 					onError(ErrorCtx{Bucket: bucket}, err)
 				} else {
-					store.Save([]byte([]byte(key)), data, bucket)
+					store.Save([]byte(key), data, bucket)
 					if onSuccess != nil {
+
+						logger.Debug("onSuccess", "bucket", bucket, "key", key, "onSuccess", GetFunctionName(onSuccess))
 						ctx := SuccessCtx{bucket, key, obj, c}
 						onSuccess(ctx)
 					}
@@ -250,6 +274,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 			} else {
 				store.Save([]byte([]byte(key)), data, bucket)
 				m["key"] = key
+				logger.Debug("Successfully saved object", "bucket", bucket, "key", key)
 
 				if onSuccess != nil {
 					ctx := SuccessCtx{bucket, key, m, c}
