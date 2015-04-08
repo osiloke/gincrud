@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
+	"time"
 )
 
 var logger = log.New("gincrud")
@@ -76,6 +77,11 @@ const (
 	XML_CONTENT  = "xml"
 )
 
+func timeTrack(start time.Time, name string) {
+	elapsed := time.Since(start)
+	log.Debug(fmt.Sprintf("%s took %s", name, elapsed))
+}
+
 func GetFunctionName(i interface{}) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
@@ -127,6 +133,50 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 		err := errors.New("unknown content-type: " + ctype)
 		c.Fail(400, err)
 		return nil, err
+	}
+}
+func doUnmarshal(key, bucket string, data [][]byte, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
+
+	defer timeTrack(time.Now(), "Do Unmarshal "+key+" from "+bucket)
+	m, err := unMarshalFn(c, data[1])
+	if m == nil {
+		m = make(map[string]interface{})
+	}
+	m["key"] = string(data[0])
+	if err != nil {
+		c.JSON(500, err)
+	} else {
+		kk := string(data[0])
+		if onSuccess != nil {
+			ctx := SuccessCtx{bucket, kk, m, c}
+			onSuccess(ctx)
+		}
+		c.JSON(200, m)
+	}
+}
+func Get(key, bucket string, store gostore.Store, c *gin.Context, record interface{},
+	unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
+	data, err := store.Get([]byte(key), bucket)
+	if err != nil {
+		//TODO: Does not exist error for store
+		if onError != nil {
+			onError(ErrorCtx{bucket, key, c}, err)
+		}
+		c.JSON(404, gin.H{"msg": fmt.Sprintf("%s Not found", key)})
+	} else {
+		if unMarshalFn != nil {
+			doUnmarshal(key, bucket, data, c, unMarshalFn, onSuccess, onError)
+		} else {
+			_ = json.Unmarshal(data[1], record)
+			m := structs.Map(record)
+			kk := string(data[0])
+			m["key"] = kk
+			if onSuccess != nil {
+				ctx := SuccessCtx{bucket, kk, m, c}
+				onSuccess(ctx)
+			}
+			c.JSON(200, m)
+		}
 	}
 }
 
@@ -183,52 +233,23 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, onSuccess OnSucc
 	}
 }
 
-func Get(key, bucket string, store gostore.Store, c *gin.Context, record interface{},
-	unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
-	data, err := store.Get([]byte(key), bucket)
-	if err != nil {
-		//TODO: Does not exist error for store
-		if onError != nil {
-			onError(ErrorCtx{bucket, key, c}, err)
-		}
-		log.Error("Could not retrieve", "key", key, "from", bucket)
-		c.JSON(404, gin.H{"msg": fmt.Sprintf("Not found")})
-	} else {
-		if unMarshalFn != nil {
-			m, err := unMarshalFn(c, data[1])
-			if m == nil {
-				m = make(map[string]interface{})
-			}
-			m["key"] = string(data[0])
-			if err != nil {
-				c.JSON(500, err)
-			} else {
-				kk := string(data[0])
-				if onSuccess != nil {
-					ctx := SuccessCtx{bucket, kk, m, c}
-					onSuccess(ctx)
-				}
-				c.JSON(200, m)
-			}
-		} else {
-			_ = json.Unmarshal(data[1], record)
-			m := structs.Map(record)
-			kk := string(data[0])
-			m["key"] = kk
-			if onSuccess != nil {
-				ctx := SuccessCtx{bucket, kk, m, c}
-				onSuccess(ctx)
-			}
-			c.JSON(200, m)
-		}
-	}
-}
-
 func Post(bucket string, store gostore.Store, c *gin.Context,
 	record interface{}, fn GetKey, marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
-	logger.Debug("Post")
+
+	defer func() {
+		if r := recover(); r != nil {
+			trace := make([]byte, 1024)
+			runtime.Stack(trace, true)
+			fmt.Printf("Stack: %s", trace)
+			//				log.Error("Stack of %d bytes: %s", count, trace)
+			//				fmt.Println("Defer Panic in auth middleware:", r)
+			logger.Error("POST:", "err", string(trace))
+			c.JSON(500, gin.H{"message": "Unable to edit item "})
+			c.Abort()
+		}
+	}()
 	if marshalFn != nil {
-		logger.Debug("Post::MarshalFn")
+		logger.Debug("Post", "bucket", bucket, "marshalfn", GetFunctionName(marshalFn))
 		obj, err := marshalFn(c)
 		if err != nil {
 			if onError != nil {
@@ -290,6 +311,18 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 
 func Put(key, bucket string, store gostore.Store, c *gin.Context, record interface{},
 	marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
+	defer func() {
+		if r := recover(); r != nil {
+			trace := make([]byte, 1024)
+			runtime.Stack(trace, true)
+			fmt.Printf("Stack: %s", trace)
+			//				log.Error("Stack of %d bytes: %s", count, trace)
+			//				fmt.Println("Defer Panic in auth middleware:", r)
+			logger.Error("Defer Panic in Gincrud PUT:", "err", string(trace))
+			c.JSON(500, gin.H{"message": "Unable to edit item "})
+			c.Abort()
+		}
+	}()
 	if marshalFn != nil {
 		obj, err := marshalFn(c)
 		if err != nil {
