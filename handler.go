@@ -54,7 +54,7 @@ type ParsedContent map[string]interface{}
 
 //Convert request json data to data and map, you can handle validation here
 type MarshalFn func(ctx *gin.Context) (map[string]interface{}, error)
-type UnMarshalFn func(*gin.Context, []byte) (map[string]interface{}, error)
+type UnMarshalFn func(*gin.Context, [][]byte) (map[string]interface{}, error)
 
 //Get unique key from object and request
 type GetKey func(interface{}, *gin.Context) string
@@ -135,10 +135,20 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 		return nil, err
 	}
 }
+func doSingleUnmarshal(bucket string, item [][]byte, c *gin.Context, unMarshalFn UnMarshalFn) (data map[string]interface{}, err error) {
+	key := string(item[0])
+	defer timeTrack(time.Now(), "Do Single Unmarshal "+key+" from "+bucket)
+	data, err = unMarshalFn(c, item)
+	if err != nil {
+		return nil, err
+	}
+	data["key"] = string(key)
+	return
+}
 func doUnmarshal(key, bucket string, data [][]byte, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 
 	defer timeTrack(time.Now(), "Do Unmarshal "+key+" from "+bucket)
-	m, err := unMarshalFn(c, data[1])
+	m, err := unMarshalFn(c, data)
 	if m == nil {
 		m = make(map[string]interface{})
 	}
@@ -181,7 +191,7 @@ func Get(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 }
 
 //TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
-func GetAll(bucket string, store gostore.Store, c *gin.Context, onSuccess OnSuccess, onError OnError) {
+func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 	var results []map[string]interface{}
 	var err error
 
@@ -205,18 +215,27 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, onSuccess OnSucc
 		}
 		c.JSON(200, []string{})
 	} else {
-		for _, element := range data {
-			var result map[string]interface{}
-			if err := json.Unmarshal(element[1], &result); err != nil {
-				onError(ErrorCtx{Bucket: bucket, GinCtx: c}, err)
-				c.JSON(500, gin.H{"msg": err})
-			} else {
-				if result == nil {
-					result = make(map[string]interface{})
+		if unMarshalFn != nil {
+			for _, element := range data {
+				data, err := doSingleUnmarshal(bucket, element, c, unMarshalFn)
+				if err == nil {
+					results = append(results, data)
 				}
+			}
+		} else {
+			for _, element := range data {
+				var result map[string]interface{}
+				if err := json.Unmarshal(element[1], &result); err != nil {
+					onError(ErrorCtx{Bucket: bucket, GinCtx: c}, err)
+					c.JSON(500, gin.H{"msg": err})
+				} else {
+					if result == nil {
+						result = make(map[string]interface{})
+					}
 
-				result["key"] = string(element[0])
-				results = append(results, result)
+					result["key"] = string(element[0])
+					results = append(results, result)
+				}
 			}
 		}
 		if len(results) == 0 {
