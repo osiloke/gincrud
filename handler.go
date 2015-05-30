@@ -28,14 +28,23 @@ type ErrorCtx struct {
 }
 
 type SuccessCtx struct {
-	Bucket string
-	Key    string
-	Result map[string]interface{}
-	GinCtx *gin.Context
+	Bucket   string
+	Key      string
+	Existing map[string]interface{}
+	Result   map[string]interface{}
+	GinCtx   *gin.Context
 }
-
 type MarshalError struct {
 	Data map[string]interface{}
+}
+
+type ChangeResult struct {
+	Old map[string]interface{}
+	New map[string]interface{}
+}
+
+type CreateResult struct {
+	New map[string]interface{}
 }
 
 type UnknownContent struct {
@@ -53,7 +62,7 @@ type JSONError interface {
 type ParsedContent map[string]interface{}
 
 //Convert request json data to data and map, you can handle validation here
-type MarshalFn func(ctx *gin.Context) (map[string]interface{}, error)
+type MarshalFn func(ctx *gin.Context) (interface{}, error)
 type UnMarshalFn func(*gin.Context, [][]byte) (map[string]interface{}, error)
 
 //Get unique key from object and request
@@ -68,7 +77,7 @@ type OnError func(ctx interface{}, err error) error
 type Results struct {
 	Data       []map[string]interface{} `json:"data"`
 	Count      int                      `json:"count,omitempty"`
-	TotalCount int                      `json:"total_count,omitempty"`
+	TotalCount uint64                   `json:"total_count,omitempty"`
 }
 
 const (
@@ -158,7 +167,7 @@ func doUnmarshal(key, bucket string, data [][]byte, c *gin.Context, unMarshalFn 
 	} else {
 		kk := string(data[0])
 		if onSuccess != nil {
-			ctx := SuccessCtx{bucket, kk, m, c}
+			ctx := SuccessCtx{Bucket: bucket, Key: kk, Result: m, GinCtx: c}
 			onSuccess(ctx)
 		}
 		c.JSON(200, m)
@@ -182,7 +191,7 @@ func Get(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 			kk := string(data[0])
 			m["key"] = kk
 			if onSuccess != nil {
-				ctx := SuccessCtx{bucket, kk, m, c}
+				ctx := SuccessCtx{Bucket: bucket, Key: kk, Result: m, GinCtx: c}
 				onSuccess(ctx)
 			}
 			c.JSON(200, m)
@@ -207,6 +216,7 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMa
 	} else if val, ok := q["beforeKey"]; ok {
 		data, err = store.GetAllBefore([]byte(val[0]), count+1, 0, bucket)
 	} else {
+		logger.Debug("GetAll", "bucket", bucket)
 		data, err = store.GetAll(count+1, 0, bucket)
 	}
 	if err != nil {
@@ -244,7 +254,7 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMa
 			if onSuccess != nil {
 			}
 			stats, _ := store.Stats(bucket)
-			total_count := stats["KeyN"].(int)
+			total_count := stats["KeyN"].(uint64)
 			c.Writer.Header().Set("X-Total-Count", fmt.Sprintf("%d", total_count))
 			c.JSON(200, Results{results, count, total_count})
 			// c.JSON(200, results)
@@ -259,17 +269,17 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 		if r := recover(); r != nil {
 			trace := make([]byte, 1024)
 			runtime.Stack(trace, true)
-			fmt.Printf("Stack: %s", trace)
+			// fmt.Printf("Stack: %s", trace)
 			//				log.Error("Stack of %d bytes: %s", count, trace)
 			//				fmt.Println("Defer Panic in auth middleware:", r)
 			logger.Error("POST:", "err", string(trace))
-			c.JSON(500, gin.H{"message": "Unable to edit item "})
+			c.JSON(500, gin.H{"message": "Unable to create item "})
 			c.Abort()
 		}
 	}()
 	if marshalFn != nil {
 		logger.Debug("Post", "bucket", bucket, "marshalfn", GetFunctionName(marshalFn))
-		obj, err := marshalFn(c)
+		ret, err := marshalFn(c)
 		if err != nil {
 			if onError != nil {
 				onError(ErrorCtx{Bucket: bucket}, err)
@@ -282,6 +292,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 			}
 
 		} else {
+			obj := ret.(map[string]interface{})
 			key := fn(obj, c)
 			if key == "" {
 				c.JSON(500, err)
@@ -294,7 +305,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 					if onSuccess != nil {
 
 						logger.Debug("onSuccess", "bucket", bucket, "key", key, "onSuccess", GetFunctionName(onSuccess))
-						ctx := SuccessCtx{bucket, key, obj, c}
+						ctx := SuccessCtx{Bucket: bucket, Key: key, Result: obj, GinCtx: c}
 						onSuccess(ctx)
 					}
 					obj["key"] = key
@@ -304,7 +315,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 		}
 
 	} else {
-		if b := c.Bind(record); b != false {
+		if b := c.Bind(record); b {
 			m := structs.Map(record)
 			data, err := json.Marshal(&record)
 			key := fn(m, c)
@@ -317,7 +328,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 				logger.Debug("Successfully saved object", "bucket", bucket, "key", key)
 
 				if onSuccess != nil {
-					ctx := SuccessCtx{bucket, key, m, c}
+					ctx := SuccessCtx{Bucket: bucket, Key: key, Result: m, GinCtx: c}
 					onSuccess(ctx)
 				}
 				c.JSON(200, m)
@@ -343,7 +354,14 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 		}
 	}()
 	if marshalFn != nil {
-		obj, err := marshalFn(c)
+		ret, err := marshalFn(c)
+		var obj, existing map[string]interface{}
+		if change, ok := ret.(ChangeResult); ok {
+			obj = change.New
+			existing = change.Old
+		} else {
+			obj = ret.(map[string]interface{})
+		}
 		if err != nil {
 			if onError != nil {
 				onError(ErrorCtx{Bucket: bucket}, err)
@@ -362,7 +380,7 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 			} else {
 				store.Save([]byte([]byte(key)), data, bucket)
 				if onSuccess != nil {
-					ctx := SuccessCtx{bucket, key, obj, c}
+					ctx := SuccessCtx{Bucket: bucket, Key: key, Existing: existing, Result: obj, GinCtx: c}
 					onSuccess(ctx)
 				}
 				c.JSON(200, obj)
@@ -381,7 +399,7 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 				m["key"] = key
 
 				if onSuccess != nil {
-					ctx := SuccessCtx{bucket, key, m, c}
+					ctx := SuccessCtx{Bucket: bucket, Key: key, Result: m, GinCtx: c}
 					onSuccess(ctx)
 				}
 				c.JSON(200, m)
