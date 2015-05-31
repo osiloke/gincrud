@@ -140,7 +140,7 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 		return nil, errors.New("Unimplemented content-type: " + ctype)
 	default:
 		err := errors.New("unknown content-type: " + ctype)
-		c.Fail(400, err)
+		c.String(400, err.Error())
 		return nil, err
 	}
 }
@@ -315,7 +315,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 		}
 
 	} else {
-		if b := c.Bind(record); b {
+		if b := c.Bind(record); b == nil {
 			m := structs.Map(record)
 			data, err := json.Marshal(&record)
 			key := fn(m, c)
@@ -334,7 +334,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 				c.JSON(200, m)
 			}
 		} else {
-			c.JSON(400, gin.H{"msg": "Seems like the data submitted is not formatted properly"})
+			c.JSON(400, gin.H{"msg": "Seems like the data submitted is not formatted properly", "because": b.Error()})
 		}
 	}
 }
@@ -388,7 +388,7 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 		}
 
 	} else {
-		if b := c.Bind(record); b != false {
+		if b := c.Bind(record); b == nil {
 			m := structs.Map(record)
 			data, err := json.Marshal(&record)
 			if err != nil {
@@ -405,7 +405,7 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 				c.JSON(200, m)
 			}
 		} else {
-			c.JSON(400, gin.H{"msg": "Seems like the data submitted is not formatted properly"})
+			c.JSON(400, gin.H{"msg": "Seems like the data submitted is not formatted properly", "because": b.Error()})
 		}
 	}
 }
