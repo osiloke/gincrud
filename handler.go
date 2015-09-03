@@ -62,8 +62,8 @@ type JSONError interface {
 type ParsedContent map[string]interface{}
 
 //Convert request json data to data and map, you can handle validation here
-type MarshalFn func(ctx *gin.Context) (interface{}, error)
-type UnMarshalFn func(*gin.Context, [][]byte) (map[string]interface{}, error)
+type MarshalFn func(ctx *gin.Context, opts interface{}) (interface{}, error)
+type UnMarshalFn func(*gin.Context, string, map[string]interface{}) (map[string]interface{}, error)
 
 //Get unique key from object and request
 type GetKey func(interface{}, *gin.Context) string
@@ -144,38 +144,38 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 		return nil, err
 	}
 }
-func doSingleUnmarshal(bucket string, item [][]byte, c *gin.Context, unMarshalFn UnMarshalFn) (data map[string]interface{}, err error) {
-	key := string(item[0])
+func doSingleUnmarshal(bucket string, key string, item map[string]interface{}, c *gin.Context, unMarshalFn UnMarshalFn) (data map[string]interface{}, err error) {
 	defer timeTrack(time.Now(), "Do Single Unmarshal "+key+" from "+bucket)
-	data, err = unMarshalFn(c, item)
+	data, err = unMarshalFn(c, key, item)
 	if err != nil {
 		return nil, err
 	}
 	data["key"] = string(key)
 	return
 }
-func doUnmarshal(key, bucket string, data [][]byte, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
+func doUnmarshal(key, bucket string, data map[string]interface{}, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 
 	defer timeTrack(time.Now(), "Do Unmarshal "+key+" from "+bucket)
-	m, err := unMarshalFn(c, data)
+	m, err := unMarshalFn(c, key, data)
 	if m == nil {
 		m = make(map[string]interface{})
 	}
-	m["key"] = string(data[0])
+	m["key"] = key
 	if err != nil {
 		c.JSON(500, err)
 	} else {
-		kk := string(data[0])
+
 		if onSuccess != nil {
-			ctx := SuccessCtx{Bucket: bucket, Key: kk, Result: m, GinCtx: c}
+			ctx := SuccessCtx{Bucket: bucket, Key: key, Result: m, GinCtx: c}
 			onSuccess(ctx)
 		}
 		c.JSON(200, m)
 	}
 }
-func Get(key, bucket string, store gostore.Store, c *gin.Context, record interface{},
+func Get(key, bucket string, store gostore.ObjectStore, c *gin.Context, record interface{},
 	unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
-	data, err := store.Get([]byte(key), bucket)
+	var data map[string]interface{}
+	err := store.Get(key, bucket, &data)
 	if err != nil {
 		//TODO: Does not exist error for store
 		if onError != nil {
@@ -186,21 +186,20 @@ func Get(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 		if unMarshalFn != nil {
 			doUnmarshal(key, bucket, data, c, unMarshalFn, onSuccess, onError)
 		} else {
-			_ = json.Unmarshal(data[1], record)
-			m := structs.Map(record)
-			kk := string(data[0])
-			m["key"] = kk
+//			_ = json.Unmarshal(data[1], record)
+//			m := structs.Map(record)
+			record = data
 			if onSuccess != nil {
-				ctx := SuccessCtx{Bucket: bucket, Key: kk, Result: m, GinCtx: c}
+				ctx := SuccessCtx{Bucket: bucket, Key: key, Result: data, GinCtx: c}
 				onSuccess(ctx)
 			}
-			c.JSON(200, m)
+			c.JSON(200, data)
 		}
 	}
 }
 
 //TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
-func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
+func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 	var results []map[string]interface{}
 	var err error
 
@@ -209,15 +208,14 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMa
 	if val, ok := q["_perPage"]; ok {
 		count, _ = strconv.Atoi(val[0])
 	}
-	var data [][][]byte
-
+	var rows gostore.ObjectRows
 	if val, ok := q["afterKey"]; ok {
-		data, err = store.GetAllAfter([]byte(val[0]), count+1, 0, bucket)
+		rows, err = store.Before(val[0], count+1, 0, bucket)
 	} else if val, ok := q["beforeKey"]; ok {
-		data, err = store.GetAllBefore([]byte(val[0]), count+1, 0, bucket)
+		rows, err = store.Since(val[0], count+1, 0, bucket)
 	} else {
 		logger.Debug("GetAll", "bucket", bucket)
-		data, err = store.GetAll(count+1, 0, bucket)
+		rows, err = store.All(count+1, 0, bucket)
 	}
 	if err != nil {
 		if onError != nil {
@@ -226,25 +224,32 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMa
 		c.JSON(200, []string{})
 	} else {
 		if unMarshalFn != nil {
-			for _, element := range data {
-				data, err := doSingleUnmarshal(bucket, element, c, unMarshalFn)
-				if err == nil {
-					results = append(results, data)
+			var ok bool = true
+			for ok{
+				var data interface{}
+				if ok, err := rows.Next(&data); ok {
+					element := data.(map[string]interface{})
+					marshalled_element, err := doSingleUnmarshal(bucket, element["id"].(string), element, c, unMarshalFn)
+					if err == nil {
+						results = append(results, marshalled_element)
+					}
+				}else{
+					if err != nil{
+						logger.Debug("Error while retrieving a row", "err", err)
+					}
+					break
 				}
 			}
 		} else {
-			for _, element := range data {
-				var result map[string]interface{}
-				if err := json.Unmarshal(element[1], &result); err != nil {
-					onError(ErrorCtx{Bucket: bucket, GinCtx: c}, err)
-					c.JSON(500, gin.H{"msg": err})
-				} else {
-					if result == nil {
-						result = make(map[string]interface{})
+			var ok bool = true
+			for ok{
+				var data interface{}
+				if ok, err := rows.Next(&data); ok {
+					results = append(results, data.(map[string]interface{}))
+				}else{
+					if err != nil{
+						logger.Debug("Error while retrieving a row", "err", err)
 					}
-
-					result["key"] = string(element[0])
-					results = append(results, result)
 				}
 			}
 		}
@@ -262,7 +267,7 @@ func GetAll(bucket string, store gostore.Store, c *gin.Context, unMarshalFn UnMa
 	}
 }
 
-func Post(bucket string, store gostore.Store, c *gin.Context,
+func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
 	record interface{}, fn GetKey, marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
 
 	defer func() {
@@ -279,7 +284,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 	}()
 	if marshalFn != nil {
 		logger.Debug("Post", "bucket", bucket, "marshalfn", GetFunctionName(marshalFn))
-		ret, err := marshalFn(c)
+		ret, err := marshalFn(c, nil)
 		if err != nil {
 			if onError != nil {
 				onError(ErrorCtx{Bucket: bucket}, err)
@@ -297,11 +302,8 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 			if key == "" {
 				c.JSON(500, err)
 			} else {
-				data, err := json.Marshal(obj)
-				if err != nil {
-					onError(ErrorCtx{Bucket: bucket}, err)
-				} else {
-					store.Save([]byte(key), data, bucket)
+				obj["id"] = key
+				if _, err := store.Save(bucket, obj); err == nil {
 					if onSuccess != nil {
 
 						logger.Debug("onSuccess", "bucket", bucket, "key", key, "onSuccess", GetFunctionName(onSuccess))
@@ -310,6 +312,10 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 					}
 					obj["key"] = key
 					c.JSON(200, obj)
+					return
+				}else{
+					onError(ErrorCtx{Bucket: bucket}, err)
+					c.JSON(500, gin.H{"msg": err.Error()})
 				}
 			}
 		}
@@ -317,14 +323,9 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 	} else {
 		if b := c.Bind(record); b == nil {
 			m := structs.Map(record)
-			data, err := json.Marshal(&record)
 			key := fn(m, c)
-			if err != nil {
-				onError(ErrorCtx{Bucket: bucket}, err)
-				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
-			} else {
-				store.Save([]byte([]byte(key)), data, bucket)
-				m["key"] = key
+			m["id"] = key
+			if _, err := store.Save(bucket, m); err == nil {
 				logger.Debug("Successfully saved object", "bucket", bucket, "key", key)
 
 				if onSuccess != nil {
@@ -332,6 +333,9 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 					onSuccess(ctx)
 				}
 				c.JSON(200, m)
+			}else{
+				onError(ErrorCtx{Bucket: bucket}, err)
+				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
 			}
 		} else {
 			c.JSON(400, gin.H{"msg": "Seems like the data submitted is not formatted properly", "because": b.Error()})
@@ -339,7 +343,7 @@ func Post(bucket string, store gostore.Store, c *gin.Context,
 	}
 }
 
-func Put(key, bucket string, store gostore.Store, c *gin.Context, record interface{},
+func Put(key, bucket string, store gostore.ObjectStore, c *gin.Context, record interface{},
 	marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -354,7 +358,7 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 		}
 	}()
 	if marshalFn != nil {
-		ret, err := marshalFn(c)
+		ret, err := marshalFn(c, nil)
 		var obj, existing map[string]interface{}
 		if change, ok := ret.(ChangeResult); ok {
 			obj = change.New
@@ -372,37 +376,36 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 			} else {
 				c.JSON(400, gin.H{"msg": err.Error()})
 			}
-
 		} else {
-			data, err := json.Marshal(obj)
-			if err != nil {
-				onError(ErrorCtx{Bucket: bucket}, err)
-			} else {
-				store.Save([]byte([]byte(key)), data, bucket)
+			if err := store.Update(key, bucket, obj); err == nil {
 				if onSuccess != nil {
 					ctx := SuccessCtx{Bucket: bucket, Key: key, Existing: existing, Result: obj, GinCtx: c}
 					onSuccess(ctx)
 				}
 				c.JSON(200, obj)
+			}else{
+				if onError != nil{
+					onError(ErrorCtx{Bucket: bucket}, err)
+				}
+				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
 			}
 		}
 
 	} else {
 		if b := c.Bind(record); b == nil {
 			m := structs.Map(record)
-			data, err := json.Marshal(&record)
-			if err != nil {
-				onError(ErrorCtx{Bucket: bucket}, err)
-				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
-			} else {
-				store.Save([]byte([]byte(key)), data, bucket)
+			if err := store.Update(key, bucket, m); err == nil {
 				m["key"] = key
-
 				if onSuccess != nil {
 					ctx := SuccessCtx{Bucket: bucket, Key: key, Result: m, GinCtx: c}
 					onSuccess(ctx)
 				}
 				c.JSON(200, m)
+			}else{
+				if onError != nil{
+					onError(ErrorCtx{Bucket: bucket}, err)
+				}
+				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
 			}
 		} else {
 			c.JSON(400, gin.H{"msg": "Seems like the data submitted is not formatted properly", "because": b.Error()})
@@ -410,8 +413,8 @@ func Put(key, bucket string, store gostore.Store, c *gin.Context, record interfa
 	}
 }
 
-func Delete(key, bucket string, store gostore.Store, c *gin.Context, onSuccess OnSuccess, onError OnError) {
-	err := store.Delete([]byte(key), bucket)
+func Delete(key, bucket string, store gostore.ObjectStore, c *gin.Context, onSuccess OnSuccess, onError OnError) {
+	err := store.Delete(key, bucket)
 	if err != nil {
 		if onError != nil {
 			onError(ErrorCtx{bucket, key, c}, err)
