@@ -63,7 +63,7 @@ type ParsedContent map[string]interface{}
 
 //Convert request json data to data and map, you can handle validation here
 type MarshalFn func(ctx *gin.Context, opts interface{}) (interface{}, error)
-type UnMarshalFn func(*gin.Context, string, map[string]interface{}) (map[string]interface{}, error)
+type UnMarshalFn func(*gin.Context, string, map[string]interface{}, interface{}) (map[string]interface{}, error)
 
 //Get unique key from object and request
 type GetKey func(interface{}, *gin.Context) string
@@ -146,7 +146,7 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 }
 func doSingleUnmarshal(bucket string, key string, item map[string]interface{}, c *gin.Context, unMarshalFn UnMarshalFn) (data map[string]interface{}, err error) {
 	defer timeTrack(time.Now(), "Do Single Unmarshal "+key+" from "+bucket)
-	data, err = unMarshalFn(c, key, item)
+	data, err = unMarshalFn(c, key, item, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func doSingleUnmarshal(bucket string, key string, item map[string]interface{}, c
 func doUnmarshal(key, bucket string, data map[string]interface{}, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 
 	defer timeTrack(time.Now(), "Do Unmarshal "+key+" from "+bucket)
-	m, err := unMarshalFn(c, key, data)
+	m, err := unMarshalFn(c, key, data, nil)
 	if m == nil {
 		m = make(map[string]interface{})
 	}
