@@ -10,6 +10,7 @@ import (
 	"github.com/osiloke/gostore"
 	"reflect"
 	"runtime"
+	"strings"
 	"strconv"
 	"time"
 )
@@ -98,7 +99,7 @@ func GetFunctionName(i interface{}) string {
 func filterFlags(content string) string {
 	for i, a := range content {
 		if a == ' ' || a == ';' {
-			return content[:i]
+			return strings.TrimSpace(content[:i])
 		}
 	}
 	return content
@@ -117,9 +118,8 @@ func Decode(c *gin.Context, obj interface{}) error {
 		}
 	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
 		return &UnknownContent{"unimplemented content-type: " + ctype}
-	default:
-		err := &UnknownContent{"unknown content-type: " + ctype}
-		return err
+	default: 
+		return &UnknownContent{"unknown content-type: " + ctype}
 	}
 }
 
