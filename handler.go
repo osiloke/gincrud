@@ -1,8 +1,7 @@
 package gincrud
 
 import (
-	"encoding/json"
-	"errors"
+	"encoding/json" 
 	"fmt"
 	"github.com/fatih/structs"
 	"github.com/gin-gonic/gin"
@@ -58,7 +57,8 @@ func (e InvalidContent) Error() string {
 }
 
 type UnknownContent struct {
-	S string
+	S string `json:"msg"`
+	ContentType string `json:"content-type"`
 }
 
 func (e UnknownContent) Error() string {
@@ -117,7 +117,7 @@ func Decode(c *gin.Context, obj interface{}) error {
 	ctype := filterFlags(c.Request.Header.Get("Content-Type"))
 	switch {
 	case c.Request.Method == "GET" || ctype == gin.MIMEPOSTForm:
-		return &UnknownContent{"unimplemented content-type: " + ctype}
+		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	case ctype == gin.MIMEJSON:
 		decoder := json.NewDecoder(c.Request.Body)
 		if err := decoder.Decode(&obj); err == nil {
@@ -126,9 +126,9 @@ func Decode(c *gin.Context, obj interface{}) error {
 			return &InvalidContent{err.Error(), gin.MIMEJSON}
 		}
 	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
-		return &UnknownContent{"unimplemented content-type: " + ctype}
+		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	default:
-		return &UnknownContent{"unknown content-type: " + ctype}
+		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	}
 }
 
@@ -136,21 +136,21 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 	ctype := filterFlags(c.Request.Header.Get("Content-Type"))
 	switch {
 	case c.Request.Method == "GET" || ctype == gin.MIMEPOSTForm:
-		return nil, errors.New("Unimplemented content-type: " + ctype)
+		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	case ctype == gin.MIMEJSON:
 		var obj ParsedContent
 		decoder := json.NewDecoder(c.Request.Body)
 		if err := decoder.Decode(obj); err == nil {
 			return obj, &InvalidContent{err.Error(), gin.MIMEJSON}
 		} else {
-			return nil, err
+			return nil, &InvalidContent{err.Error(), gin.MIMEJSON}
 		}
 	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
-		return nil, errors.New("Unimplemented content-type: " + ctype)
+		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	default:
-		err := errors.New("unknown content-type: " + ctype)
+		err := &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 		c.String(400, err.Error())
-		return nil, err
+		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	}
 }
 func doSingleUnmarshal(bucket string, key string, item map[string]interface{}, c *gin.Context, unMarshalFn UnMarshalFn) (data map[string]interface{}, err error) {
