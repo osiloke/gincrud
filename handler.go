@@ -58,7 +58,7 @@ func (e InvalidContent) Error() string {
 }
 
 type UnknownContent struct {
-	S string `json:"msg"`
+	S string
 }
 
 func (e UnknownContent) Error() string {
@@ -123,7 +123,7 @@ func Decode(c *gin.Context, obj interface{}) error {
 		if err := decoder.Decode(&obj); err == nil {
 			return nil
 		} else {
-			return err
+			return &InvalidContent{err.Error(), gin.MIMEJSON}
 		}
 	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
 		return &UnknownContent{"unimplemented content-type: " + ctype}
