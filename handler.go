@@ -48,11 +48,20 @@ type CreateResult struct {
 	New map[string]interface{}
 }
 
+type InvalidContent struct {
+	S string `json:"msg"`
+	ContentType string
+}
+
+func (e InvalidContent) Error() string {
+	return e.S+" content-type:"+e.ContentType
+}
+
 type UnknownContent struct {
 	S string `json:"msg"`
 }
 
-func (e *UnknownContent) Error() string {
+func (e UnknownContent) Error() string {
 	return e.S
 }
 
@@ -118,7 +127,7 @@ func Decode(c *gin.Context, obj interface{}) error {
 		}
 	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
 		return &UnknownContent{"unimplemented content-type: " + ctype}
-	default: 
+	default:
 		return &UnknownContent{"unknown content-type: " + ctype}
 	}
 }
@@ -132,7 +141,7 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 		var obj ParsedContent
 		decoder := json.NewDecoder(c.Request.Body)
 		if err := decoder.Decode(obj); err == nil {
-			return obj, err
+			return obj, &InvalidContent{err.Error(), gin.MIMEJSON}
 		} else {
 			return nil, err
 		}
