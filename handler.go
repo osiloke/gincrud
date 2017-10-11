@@ -1,7 +1,7 @@
 package gincrud
 
 import (
-	"encoding/json" 
+	"encoding/json"
 	"fmt"
 	"github.com/fatih/structs"
 	"github.com/gin-gonic/gin"
@@ -9,8 +9,8 @@ import (
 	"github.com/osiloke/gostore"
 	"reflect"
 	"runtime"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -48,16 +48,16 @@ type CreateResult struct {
 }
 
 type InvalidContent struct {
-	S string `json:"msg"`
+	S           string `json:"msg"`
 	ContentType string
 }
 
 func (e InvalidContent) Error() string {
-	return e.S+" content-type:"+e.ContentType
+	return e.S + " content-type:" + e.ContentType
 }
 
 type UnknownContent struct {
-	S string `json:"msg"`
+	S           string `json:"msg"`
 	ContentType string `json:"content-type"`
 }
 
@@ -195,8 +195,8 @@ func Get(key, bucket string, store gostore.ObjectStore, c *gin.Context, record i
 		if unMarshalFn != nil {
 			doUnmarshal(key, bucket, data, c, unMarshalFn, onSuccess, onError)
 		} else {
-//			_ = json.Unmarshal(data[1], record)
-//			m := structs.Map(record)
+			//			_ = json.Unmarshal(data[1], record)
+			//			m := structs.Map(record)
 			record = data
 			if onSuccess != nil {
 				ctx := SuccessCtx{Bucket: bucket, Key: key, Result: data, GinCtx: c}
@@ -234,7 +234,7 @@ func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalF
 	} else {
 		if unMarshalFn != nil {
 			var ok bool = true
-			for ok{
+			for ok {
 				var data interface{}
 				if ok, err := rows.Next(&data); ok {
 					element := data.(map[string]interface{})
@@ -242,8 +242,8 @@ func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalF
 					if err == nil {
 						results = append(results, marshalled_element)
 					}
-				}else{
-					if err != nil{
+				} else {
+					if err != nil {
 						logger.Debug("Error while retrieving a row", "err", err)
 					}
 					break
@@ -251,12 +251,12 @@ func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalF
 			}
 		} else {
 			var ok bool = true
-			for ok{
+			for ok {
 				var data interface{}
 				if ok, err := rows.Next(&data); ok {
 					results = append(results, data.(map[string]interface{}))
-				}else{
-					if err != nil{
+				} else {
+					if err != nil {
 						logger.Debug("Error while retrieving a row", "err", err)
 					}
 				}
@@ -312,7 +312,7 @@ func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
 				c.JSON(500, err)
 			} else {
 				obj["id"] = key
-				if _, err := store.Save(bucket, obj); err == nil {
+				if _, err := store.Save(key, bucket, obj); err == nil {
 					if onSuccess != nil {
 
 						logger.Debug("onSuccess", "bucket", bucket, "key", key, "onSuccess", GetFunctionName(onSuccess))
@@ -322,7 +322,7 @@ func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
 					obj["key"] = key
 					c.JSON(200, obj)
 					return
-				}else{
+				} else {
 					onError(ErrorCtx{Bucket: bucket}, err)
 					c.JSON(500, gin.H{"msg": err.Error()})
 				}
@@ -334,7 +334,7 @@ func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
 			m := structs.Map(record)
 			key := fn(m, c)
 			m["id"] = key
-			if _, err := store.Save(bucket, m); err == nil {
+			if _, err := store.Save(key, bucket, m); err == nil {
 				logger.Debug("Successfully saved object", "bucket", bucket, "key", key)
 
 				if onSuccess != nil {
@@ -342,7 +342,7 @@ func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
 					onSuccess(ctx)
 				}
 				c.JSON(200, m)
-			}else{
+			} else {
 				onError(ErrorCtx{Bucket: bucket}, err)
 				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
 			}
@@ -392,8 +392,8 @@ func Put(key, bucket string, store gostore.ObjectStore, c *gin.Context, record i
 					onSuccess(ctx)
 				}
 				c.JSON(200, obj)
-			}else{
-				if onError != nil{
+			} else {
+				if onError != nil {
 					onError(ErrorCtx{Bucket: bucket}, err)
 				}
 				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
@@ -410,8 +410,8 @@ func Put(key, bucket string, store gostore.ObjectStore, c *gin.Context, record i
 					onSuccess(ctx)
 				}
 				c.JSON(200, m)
-			}else{
-				if onError != nil{
+			} else {
+				if onError != nil {
 					onError(ErrorCtx{Bucket: bucket}, err)
 				}
 				c.JSON(500, gin.H{"msg": "An error occured and this item could not be saved"})
