@@ -3,15 +3,16 @@ package gincrud
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/fatih/structs"
-	"github.com/gin-gonic/gin"
-	"github.com/mgutz/logxi/v1"
-	"github.com/osiloke/gostore"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fatih/structs"
+	"github.com/gin-gonic/gin"
+	log "github.com/mgutz/logxi/v1"
+	gostore "github.com/osiloke/gostore"
 )
 
 var logger = log.New("gincrud")
@@ -117,7 +118,14 @@ func Decode(c *gin.Context, obj interface{}) error {
 	ctype := filterFlags(c.Request.Header.Get("Content-Type"))
 	switch {
 	case c.Request.Method == "GET" || ctype == gin.MIMEPOSTForm:
+		if err := c.Bind(&obj); err != nil {
+			return &InvalidContent{err.Error(), gin.MIMEJSON}
+		}
+		return nil
+	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
 		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
+	case strings.Contains(ctype, "json"):
+		fallthrough
 	case ctype == gin.MIMEJSON:
 		decoder := json.NewDecoder(c.Request.Body)
 		if err := decoder.Decode(&obj); err == nil {
@@ -125,8 +133,6 @@ func Decode(c *gin.Context, obj interface{}) error {
 		} else {
 			return &InvalidContent{err.Error(), gin.MIMEJSON}
 		}
-	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
-		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	default:
 		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	}
@@ -153,6 +159,7 @@ func requestContent(c *gin.Context) (ParsedContent, error) {
 		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	}
 }
+
 func doSingleUnmarshal(bucket string, key string, item map[string]interface{}, c *gin.Context, unMarshalFn UnMarshalFn) (data map[string]interface{}, err error) {
 	defer timeTrack(time.Now(), "Do Single Unmarshal "+key+" from "+bucket)
 	data, err = unMarshalFn(c, key, item, nil)
