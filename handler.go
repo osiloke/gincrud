@@ -72,17 +72,17 @@ type JSONError interface {
 
 type ParsedContent map[string]interface{}
 
-//Convert request json data to data and map, you can handle validation here
+// Convert request json data to data and map, you can handle validation here
 type MarshalFn func(ctx *gin.Context, opts interface{}) (interface{}, error)
 type UnMarshalFn func(*gin.Context, string, map[string]interface{}, interface{}) (map[string]interface{}, error)
 
-//Get unique key from object and request
+// Get unique key from object and request
 type GetKey func(interface{}, *gin.Context) string
 
-//Called when a crud operation is successful
+// Called when a crud operation is successful
 type OnSuccess func(ctx SuccessCtx) (string, error)
 
-//Called when a crud operation fails
+// Called when a crud operation fails
 type OnError func(ctx interface{}, err error) error
 
 type Results struct {
@@ -135,28 +135,6 @@ func Decode(c *gin.Context, obj interface{}) error {
 		}
 	default:
 		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
-	}
-}
-
-func requestContent(c *gin.Context) (ParsedContent, error) {
-	ctype := filterFlags(c.Request.Header.Get("Content-Type"))
-	switch {
-	case c.Request.Method == "GET" || ctype == gin.MIMEPOSTForm:
-		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
-	case ctype == gin.MIMEJSON:
-		var obj ParsedContent
-		decoder := json.NewDecoder(c.Request.Body)
-		if err := decoder.Decode(obj); err == nil {
-			return obj, &InvalidContent{err.Error(), gin.MIMEJSON}
-		} else {
-			return nil, &InvalidContent{err.Error(), gin.MIMEJSON}
-		}
-	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
-		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
-	default:
-		err := &UnknownContent{"unimplemented content-type: " + ctype, ctype}
-		c.String(400, err.Error())
-		return nil, &UnknownContent{"unimplemented content-type: " + ctype, ctype}
 	}
 }
 
@@ -214,7 +192,7 @@ func Get(key, bucket string, store gostore.ObjectStore, c *gin.Context, record i
 	}
 }
 
-//TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
+// TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
 func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 	var results []map[string]interface{}
 	var err error
