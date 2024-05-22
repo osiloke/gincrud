@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"dario.cat/mergo"
 	"github.com/fatih/structs"
 	"github.com/gin-gonic/gin"
+	ginform "github.com/mazrean/formstream/gin"
 	log "github.com/mgutz/logxi/v1"
-	gostore "github.com/osiloke/gostore"
+	common "github.com/osiloke/gostore-common"
 )
 
 var logger = log.New("gincrud")
@@ -117,13 +119,41 @@ func filterFlags(content string) string {
 func Decode(c *gin.Context, obj interface{}) error {
 	ctype := filterFlags(c.Request.Header.Get("Content-Type"))
 	switch {
-	case c.Request.Method == "GET" || ctype == gin.MIMEPOSTForm:
+	case ctype == gin.MIMEMultipartPOSTForm:
+		parser, err := ginform.NewParser(c)
+		if err != nil {
+			return &InvalidContent{err.Error(), ctype}
+		}
+		err = parser.Parse()
+		if err != nil {
+			return &InvalidContent{err.Error(), ctype}
+		}
+		form := map[string]interface{}{}
+		for _, v := range parser.ValueMap() {
+			for _, vv := range v {
+				s, h := vv.Unwrap()
+				if len(s) > 0 {
+					form[h.Name()] = s
+				}
+			}
+		}
+		err = mergo.Merge(obj, form)
+		if err != nil {
+			return &InvalidContent{err.Error(), ctype}
+		}
+		return nil
+	case c.Request.Method == "GET":
+		fallthrough
+	case ctype == gin.MIMEPOSTForm:
 		if err := c.Bind(&obj); err != nil {
-			return &InvalidContent{err.Error(), gin.MIMEJSON}
+			return &InvalidContent{err.Error(), ctype}
 		}
 		return nil
 	case ctype == gin.MIMEXML || ctype == gin.MIMEXML2:
-		return &UnknownContent{"unimplemented content-type: " + ctype, ctype}
+		if err := c.Bind(&obj); err != nil {
+			return &InvalidContent{err.Error(), ctype}
+		}
+		return nil
 	case strings.Contains(ctype, "json"):
 		fallthrough
 	case ctype == gin.MIMEJSON:
@@ -166,7 +196,7 @@ func doUnmarshal(key, bucket string, data map[string]interface{}, c *gin.Context
 		c.JSON(200, m)
 	}
 }
-func Get(key, bucket string, store gostore.ObjectStore, c *gin.Context, record interface{},
+func Get(key, bucket string, store common.ObjectStore, c *gin.Context, record interface{},
 	unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 	var data map[string]interface{}
 	err := store.Get(key, bucket, &data)
@@ -193,7 +223,7 @@ func Get(key, bucket string, store gostore.ObjectStore, c *gin.Context, record i
 }
 
 // TODO: Extract core logic from each crud function i.e make doGetAll, doGet, ... they return data, err
-func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
+func GetAll(bucket string, store common.ObjectStore, c *gin.Context, unMarshalFn UnMarshalFn, onSuccess OnSuccess, onError OnError) {
 	var results []map[string]interface{}
 	var err error
 
@@ -202,7 +232,7 @@ func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalF
 	if val, ok := q["_perPage"]; ok {
 		count, _ = strconv.Atoi(val[0])
 	}
-	var rows gostore.ObjectRows
+	var rows common.ObjectRows
 	if val, ok := q["afterKey"]; ok {
 		rows, err = store.Before(val[0], count+1, 0, bucket)
 	} else if val, ok := q["beforeKey"]; ok {
@@ -261,7 +291,7 @@ func GetAll(bucket string, store gostore.ObjectStore, c *gin.Context, unMarshalF
 	}
 }
 
-func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
+func Post(bucket string, store common.ObjectStore, c *gin.Context,
 	record interface{}, fn GetKey, marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
 
 	defer func() {
@@ -337,7 +367,7 @@ func Post(bucket string, store gostore.ObjectStore, c *gin.Context,
 	}
 }
 
-func Put(key, bucket string, store gostore.ObjectStore, c *gin.Context, record interface{},
+func Put(key, bucket string, store common.ObjectStore, c *gin.Context, record interface{},
 	marshalFn MarshalFn, onSuccess OnSuccess, onError OnError) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -407,7 +437,7 @@ func Put(key, bucket string, store gostore.ObjectStore, c *gin.Context, record i
 	}
 }
 
-func Delete(key, bucket string, store gostore.ObjectStore, c *gin.Context, onSuccess OnSuccess, onError OnError) {
+func Delete(key, bucket string, store common.ObjectStore, c *gin.Context, onSuccess OnSuccess, onError OnError) {
 	err := store.Delete(key, bucket)
 	if err != nil {
 		if onError != nil {
