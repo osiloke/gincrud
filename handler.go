@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	ginform "github.com/mazrean/formstream/gin"
 	log "github.com/mgutz/logxi/v1"
-	common "github.com/osiloke/gostore-common"
+	common "github.com/osiloke/gostore/common"
 )
 
 var logger = log.New("gincrud")
